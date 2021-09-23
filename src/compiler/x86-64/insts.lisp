@@ -3592,6 +3592,24 @@
       (delete-stmt stmt)
       next)))
 
+;;; "OR r, imm1" + "OR r, imm2" -> "OR r, (imm1 | imm2)"
+(defpattern "or + or -> or" ((or) (or)) (stmt next)
+  (binding* (((size1 dst1 src1) (parse-2-operands stmt))
+             ((size2 dst2 src2) (parse-2-operands next)))
+    (flet ((larger-of (size1 size2)
+               (if (or (eq size1 :qword) (eq size2 :qword)) :qword :dword)))
+      (when (and (gpr-tn-p dst1)
+                 (location= dst2 dst1)
+                 (member size1 '(:qword :dword))
+                 (typep src1 '(signed-byte 32))
+                 (member size2 '(:dword :qword))
+                 (typep src2 '(signed-byte 32)))
+        (setf (stmt-operands next)
+              `(,(encode-size-prefix (larger-of size1 size2)) ,dst2 ,(logior src1 src2)))
+        (add-stmt-labels next (stmt-labels stmt))
+        (delete-stmt stmt)
+        next))))
+
 ;;; In "{AND,OR,...} reg, src ; TEST reg, reg ; {JMP,SET} {:z,:nz,:s,:ns}"
 ;;; the TEST is unnecessary since ALU operations set the Z and S flags.
 ;;; Per the processor manual, TEST clears OF and CF, so presumably
