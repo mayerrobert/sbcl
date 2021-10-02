@@ -305,6 +305,9 @@
   (let* ((block (node-block node))
          (component (block-component block)))
     (setf (node-reoptimize node) t)
+    (when (cast-p node)
+      (do-uses (node (cast-value node))
+        (reoptimize-node node)))
     (reoptimize-component component t)
     (setf (block-reoptimize block) t)))
 
@@ -967,9 +970,14 @@
     (when (and entry
                (eq (node-home-lambda node) (node-home-lambda entry)))
       (setf (entry-exits entry) (delq1 node (entry-exits entry)))
-      (if value
-          (delete-filter node (node-lvar node) value)
-          (unlink-node node)))))
+      (cond (value
+             ;; The number of consumed values is now known, reoptimize the users.
+             ;; The VALUES transform in particular benefits from this.
+             (do-uses (use value)
+               (reoptimize-node use))
+             (delete-filter node (node-lvar node) value))
+            (t
+             (unlink-node node))))))
 
 
 ;;;; combination IR1 optimization
@@ -1137,6 +1145,8 @@
                (when fun
                  (let ((res (funcall fun node)))
                    (when res
+                     (when (eq show :derive-type)
+                       (show-type-derivation node res))
                      (derive-node-type node (coerce-to-values res))
                      (maybe-terminate-block node nil)))))))
       (ecase kind
@@ -1185,6 +1195,8 @@
            (let ((attr (fun-info-attributes info)))
              (when (constant-fold-call-p node)
                (constant-fold-call node)
+               (return-from ir1-optimize-combination))
+             (when (fold-call-derived-to-constant node)
                (return-from ir1-optimize-combination))
              (when (and (ir1-attributep attr commutative)
                         (= (length args) 2)
@@ -1324,6 +1336,8 @@
                       (defined-fun-inlinep leaf)
                       'no-chance)))
     (cond
+      ((eq (basic-combination-kind call) :error)
+       (values nil nil))
       (unknown-keys
        (setf (basic-combination-kind call) :unknown-keys)
        (values leaf nil))
@@ -1431,8 +1445,11 @@
              (cond (valid
                     (assert-call-type call type)
                     (maybe-terminate-block call ir1-converting-not-optimizing-p)
-                    (setf (combination-kind call) :full)
-                    (recognize-known-call call ir1-converting-not-optimizing-p unknown-keys))
+                    (cond ((eq (combination-kind call) :error)
+                           (values nil nil))
+                          (t
+                           (setf (combination-kind call) :full)
+                           (recognize-known-call call ir1-converting-not-optimizing-p unknown-keys))))
                    (t
                     (setf (combination-kind call) :error)
                     (values nil nil))))))))
@@ -1532,7 +1549,7 @@
                                      (funcall fun node)))
                        (fun-name (combination-fun-source-name node)))
                    (when (show-transform-p show fun-name)
-                     (show-transform "ir" fun-name new-form))
+                     (show-transform "ir" fun-name new-form node))
                    (transform-call node new-form fun-name))
                  (values :none nil))
              (ecase severity
@@ -1793,6 +1810,15 @@
                                         values)))
                    fun-name)))))))
   (values))
+
+(defun fold-call-derived-to-constant (call)
+  (when (flushable-combination-p call)
+    (let ((type (node-derived-type call)))
+      (when (type-single-value-p type)
+        (multiple-value-bind (single-p value) (type-singleton-p (single-value-type type))
+          (when single-p
+            (replace-combination-with-constant value call)
+            t))))))
 
 ;;;; local call optimization
 
@@ -2120,7 +2146,11 @@
            (eq (node-home-lambda ref)
                (lambda-home (lambda-var-home var))))
       (let ((ref-type (single-value-type (node-derived-type ref))))
-        (cond ((csubtypep (single-value-type (lvar-type arg)) ref-type)
+        (cond ((or (csubtypep (single-value-type (lvar-type arg)) ref-type)
+                   ;; Can't impart the same type to multiple uses, as
+                   ;; they are coming from different branches with
+                   ;; different derived values.
+                   (consp (lvar-uses lvar)))
                (substitute-lvar-uses lvar arg
                                      ;; Really it is (EQ (LVAR-USES LVAR) REF):
                                      t)

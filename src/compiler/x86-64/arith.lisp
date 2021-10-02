@@ -705,7 +705,8 @@
                       (values nil result)
                       (values result temp-reg-tn))
                 (move result number)
-                ,@body
+                (assemble ()
+                 ,@body)
                 (when save (inst mov save result)))))
 
 (define-vop (fast-ash-c/fixnum=>fixnum)
@@ -753,21 +754,9 @@
   (:note "inline ASH")
   (:generator 3
     (with-shift-operands
-     (move ecx amount)
-     ;; The result-type ensures us that this shift will not overflow.
-     (inst shl result :cl))))
-
-(define-vop (fast-ash-left/fixnum-unbounded=>fixnum
-             fast-ash-left/fixnum=>fixnum)
-  (:translate)
-  (:generator 3
-    (move result number)
-    (move ecx amount)
-    (inst cmp amount 63)
-    (inst jmp :be OKAY)
-    (zeroize result)
-    OKAY
-    (inst shl result :cl)))
+      (move ecx amount)
+      ;; The result-type ensures us that this shift will not overflow.
+      (inst shl result :cl))))
 
 (define-vop (fast-ash-c/signed=>signed)
   (:translate ash)
@@ -800,9 +789,9 @@
           ((encodable-as-lea) (generate-lea))
           (t
            (with-shift-operands
-                  (if (plusp amount)
-                      (inst shl result amount)
-                      (inst shr result (- amount))))))))
+             (if (plusp amount)
+                 (inst shl result amount)
+                 (inst shr result (- amount))))))))
 
 (define-vop (fast-ash-left/signed=>signed)
   (:translate ash)
@@ -816,8 +805,8 @@
   (:note "inline ASH")
   (:generator 4
     (with-shift-operands
-     (move ecx amount)
-     (inst shl result :cl))))
+      (move ecx amount)
+      (inst shl result :cl))))
 
 (define-vop (fast-ash-left/unsigned=>unsigned)
   (:translate ash)
@@ -831,79 +820,85 @@
   (:note "inline ASH")
   (:generator 4
     (with-shift-operands
-     (move ecx amount)
-     (inst shl result :cl))))
-
-(define-vop (fast-ash-left/unsigned-unbounded=>unsigned
-             fast-ash-left/unsigned=>unsigned)
-  (:translate)
+      (move ecx amount)
+      (inst shl result :cl))))
+(define-vop (fast-ash-left/fixnum-modfx=>fixnum
+             fast-ash-left/fixnum=>fixnum)
+  (:translate ash-left-modfx)
+  (:args-var args)
   (:generator 3
-    (move result number)
-    (move ecx amount)
-    (inst cmp amount 63)
-    (inst jmp :be OKAY)
-    (zeroize result)
-    OKAY
-    (inst shl result :cl)))
+    (with-shift-operands
+      (move ecx amount)
+      (unless (csubtypep (tn-ref-type (tn-ref-across args)) ;; amount
+                         (specifier-type '(mod 63)))
+        (inst cmp amount 63)
+        (inst jmp :be OKAY)
+        (zeroize result))
+      OKAY
+      (inst shl result :cl))))
 
-(define-vop (fast-ash/signed=>signed)
-  (:translate ash)
-  (:policy :fast-safe)
-  (:args (number :scs (signed-reg) :target result)
-         (amount :scs (signed-reg) :target ecx))
-  (:arg-types signed-num signed-num)
-  (:results (result :scs (signed-reg) :from (:argument 0)))
-  (:result-types signed-num)
-  (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) ecx)
-  (:note "inline ASH")
-  (:generator 5
-    (move result number)
-    (move ecx amount)
-    (inst test ecx ecx)
-    (inst jmp :ns POSITIVE)
-    (inst neg ecx)
-    (inst cmp ecx 63)
-    (inst jmp :be OKAY)
-    (inst mov ecx 63)
-    OKAY
-    (inst sar result :cl)
-    (inst jmp DONE)
+(define-vop (fast-ash-left-mod64-c/unsigned=>unsigned
+             fast-ash-c/unsigned=>unsigned)
+  (:translate ash-left-mod64))
 
-    POSITIVE
-    ;; The result-type ensures us that this shift will not overflow.
-    (inst shl result :cl)
+(define-vop (fast-ash-left-modfx-c/fixnum=>fixnum
+             fast-ash-c/fixnum=>fixnum)
+  (:variant :modular)
+  (:translate ash-left-modfx))
 
-    DONE))
+(define-vop (fast-ash-left/unsigned-mod64=>unsigned
+             fast-ash-left/unsigned=>unsigned)
+  (:translate ash-left-mod64)
+  (:args-var args)
+  (:generator 3
+    (with-shift-operands
+      (move ecx amount)
+      (unless (csubtypep (tn-ref-type (tn-ref-across args)) ;; amount
+                         (specifier-type '(mod 63)))
+        (inst cmp amount 63)
+        (inst jmp :be OKAY)
+        (zeroize result))
+      OKAY
+      (inst shl result :cl))))
 
-(define-vop (fast-ash/unsigned=>unsigned)
-  (:translate ash)
-  (:policy :fast-safe)
-  (:args (number :scs (unsigned-reg) :target result)
-         (amount :scs (signed-reg) :target ecx))
-  (:arg-types unsigned-num signed-num)
-  (:results (result :scs (unsigned-reg) :from (:argument 0)))
-  (:result-types unsigned-num)
-  (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) ecx)
-  (:note "inline ASH")
-  (:generator 5
-    (move result number)
-    (move ecx amount)
-    (inst test ecx ecx)
-    (inst jmp :ns POSITIVE)
-    (inst neg ecx)
-    (inst cmp ecx 63)
-    (inst jmp :be OKAY)
-    (zeroize result)
-    (inst jmp DONE)
-    OKAY
-    (inst shr result :cl)
-    (inst jmp DONE)
+(define-vop (fast-ash-left/fixnum-modfx=>fixnum
+             fast-ash-left/fixnum=>fixnum)
+  (:translate ash-left-modfx)
+  (:args-var args)
+  (:generator 3
+    (with-shift-operands
+      (move ecx amount)
+      (unless (csubtypep (tn-ref-type (tn-ref-across args)) ;; amount
+                         (specifier-type '(mod 63)))
+        (inst cmp amount 63)
+        (inst jmp :be OKAY)
+        (zeroize result))
+      OKAY
+      (inst shl result :cl))))
 
-    POSITIVE
-    ;; The result-type ensures us that this shift will not overflow.
-    (inst shl result :cl)
+(define-vop (fast-ash-left-mod64-c/unsigned=>unsigned
+             fast-ash-c/unsigned=>unsigned)
+  (:translate ash-left-mod64))
 
-    DONE))
+(define-vop (fast-ash-left-modfx-c/fixnum=>fixnum
+             fast-ash-c/fixnum=>fixnum)
+  (:variant :modular)
+  (:translate ash-left-modfx))
+
+(define-vop (fast-ash-left/unsigned-mod64=>unsigned
+             fast-ash-left/unsigned=>unsigned)
+  (:translate ash-left-mod64)
+  (:args-var args)
+  (:generator 3
+    (with-shift-operands
+      (move ecx amount)
+      (unless (csubtypep (tn-ref-type (tn-ref-across args)) ;; amount
+                         (specifier-type '(mod 63)))
+        (inst cmp amount 63)
+        (inst jmp :be OKAY)
+        (zeroize result))
+      OKAY
+      (inst shl result :cl))))
 
 (define-vop (fast-%ash/right/unsigned)
   (:translate %ash/right)
@@ -916,8 +911,8 @@
   (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) rcx)
   (:generator 4
     (with-shift-operands
-     (move rcx amount)
-     (inst shr result :cl))))
+      (move rcx amount)
+      (inst shr result :cl))))
 
 (define-vop (fast-%ash/right/signed)
   (:translate %ash/right)
@@ -930,8 +925,8 @@
   (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) rcx)
   (:generator 4
     (with-shift-operands
-     (move rcx amount)
-     (inst sar result :cl))))
+      (move rcx amount)
+      (inst sar result :cl))))
 
 (define-vop (fast-%ash/right/fixnum)
   (:translate %ash/right)
@@ -944,10 +939,118 @@
   (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) rcx)
   (:generator 3
     (with-shift-operands
-     (move rcx amount)
-     (inst sar result :cl)
-     (inst and result (lognot fixnum-tag-mask)))))
+      (move rcx amount)
+      (inst sar result :cl)
+      (inst and result (lognot fixnum-tag-mask)))))
 ) ; end MACROLET
+
+(define-vop (fast-ash/unsigned=>unsigned)
+  (:translate ash)
+  (:policy :fast-safe)
+  (:args (number :scs (unsigned-reg) :target result)
+         (amount :scs (signed-reg) :target ecx))
+  (:arg-types unsigned-num signed-num)
+  (:results (result :scs (unsigned-reg) :from (:argument 0)))
+  (:result-types unsigned-num)
+  (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) ecx)
+  (:args-var args)
+  (:variant-vars check-amount signed)
+  (:note "inline ASH")
+  (:generator 5
+    (move result number)
+    (move ecx amount)
+    (inst test ecx ecx)
+    (inst jmp :ns POSITIVE)
+    (inst neg ecx)
+    (unless (csubtypep (tn-ref-type (tn-ref-across args))
+                       (specifier-type `(integer -63 *)))
+      (inst cmp ecx 63)
+      (inst jmp :be OKAY)
+      (cond (signed
+             (inst or ecx 63))
+            (t
+             (zeroize result))))
+    OKAY
+    (if signed
+        (inst sar result :cl)
+        (inst shr result :cl))
+    (inst jmp DONE)
+
+    POSITIVE
+    (unless (or (not check-amount) ;; The result-type ensures us that this shift will not overflow.
+                (csubtypep (tn-ref-type (tn-ref-across args))
+                           (specifier-type `(integer * 63))))
+      (inst cmp ecx 63)
+      (inst jmp :be STILL-OKAY)
+      (zeroize result))
+    STILL-OKAY
+    (inst shl result :cl)
+
+    DONE))
+
+(define-vop (fast-ash/signed=>signed
+             fast-ash/unsigned=>unsigned)
+  (:args (number :scs (signed-reg) :target result)
+         (amount :scs (signed-reg) :target ecx))
+  (:arg-types signed-num signed-num)
+  (:results (result :scs (signed-reg) :from (:argument 0)))
+  (:result-types signed-num)
+  (:variant nil t))
+
+(define-vop (fast-ash-modfx/signed/unsigned=>fixnum)
+  (:translate ash-modfx)
+  (:policy :fast-safe)
+  (:args (number :scs (signed-reg unsigned-reg) :to :save)
+         (amount :scs (signed-reg) :target ecx))
+  (:arg-types (:or signed-num unsigned-num) signed-num)
+  (:results (result :scs (any-reg) :from (:argument 0)))
+  (:args-var args)
+  (:result-types tagged-num)
+  (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) ecx)
+  (:note "inline ASH")
+  (:generator 3
+    (move result number)
+    (move ecx amount)
+    (inst test ecx ecx)
+    (inst jmp :ns POSITIVE)
+    (inst neg ecx)
+    (unless (csubtypep (tn-ref-type (tn-ref-across args))
+                       (specifier-type `(integer -63 *)))
+      (inst cmp ecx 63)
+      (inst jmp :be OKAY)
+      (sc-case number
+        (signed-reg
+         (inst or ecx 63))
+        (unsigned-reg
+         (zeroize result))))
+    OKAY
+    (sc-case number
+      (signed-reg
+       (inst sar result :cl))
+      (unsigned-reg
+       (inst shr result :cl)))
+    (inst jmp DONE)
+
+    POSITIVE
+    (unless (csubtypep (tn-ref-type (tn-ref-across args))
+                       (specifier-type `(integer * 63)))
+      (inst cmp ecx 63)
+      (inst jmp :be STILL-OKAY)
+      (zeroize result))
+    STILL-OKAY
+    (inst shl result :cl)
+    DONE
+    (inst shl result n-fixnum-tag-bits)))
+
+(define-vop (fast-ash-modfx/signed=>signed
+             fast-ash/signed=>signed)
+  (:variant t t)
+  (:translate ash-modfx))
+
+(define-vop (fast-ash-mod64/unsigned=>unsigned
+             fast-ash/unsigned=>unsigned)
+  (:variant t nil)
+  (:translate ash-mod64))
 
 (in-package "SB-C")
 
@@ -1496,17 +1599,30 @@
               (sb-c::delete-vop vop)
               new)))))))
 
-(defun emit-optimized-cmp (x y)
-  (if (and (gpr-tn-p x) (eql y 0))
+(defun emit-optimized-cmp (x y &optional x-ctype)
+  ;; Shorten the encoding by eliding a REX prefix where the upper bits
+  ;; can not possibly matter.
+  ;; Be sure to account for N-FIXNUM-TAG-BITS in determining how many bits
+  ;; of precision are in the representation of X.
+  ;; Little-endian addressing makes this valid for stack TNs as well as registers.
+  (let ((operand-size (if (and (numeric-type-p x-ctype)
+                               (typep y '(signed-byte 32))
+                               (csubtypep x-ctype
+                                          (if (sc-is x any-reg descriptor-reg control-stack)
+                                              (specifier-type '(signed-byte 31))
+                                              (specifier-type '(signed-byte 32)))))
+                          :dword
+                          :qword)))
+    (if (and (gpr-tn-p x) (eql y 0))
       ;; Amazingly (to me), use of TEST in lieu of CMP produces all the correct
       ;; flag bits for inequality comparison as well as EQL comparison.
       ;; You'd think that the Jxx instruction should examine _only_ the S flag,
       ;; but in fact the other flags are right too. Nonetheless this is
       ;; quite confusing, and I would prefer that we alter the branch test
       ;; when emitting TEST in place of CMP.
-      (inst test x x) ; smaller instruction
-      (progn (multiple-value-setq (x y) (ensure-not-mem+mem x y))
-             (inst cmp x y))))
+        (inst test operand-size x x) ; smaller instruction
+        (progn (multiple-value-setq (x y) (ensure-not-mem+mem x y))
+               (inst cmp operand-size x y)))))
 
 (macrolet ((define-conditional-vop (tran cond unsigned not-cond not-unsigned)
              (declare (ignore not-cond not-unsigned))
@@ -1517,9 +1633,11 @@
                                    ,(symbolicate "FAST-CONDITIONAL"  suffix))
                         (:translate ,tran)
                         (:conditional ,(if signed cond unsigned))
+                        (:args-var x-tn-ref)
                         (:generator ,cost
                           (emit-optimized-cmp
-                           x ,(if (eq suffix '-c/fixnum) `(fixnumize y) 'y)))))
+                           x ,(if (eq suffix '-c/fixnum) `(fixnumize y) 'y)
+                           (tn-ref-type x-tn-ref)))))
                    '(/fixnum -c/fixnum /signed -c/signed /unsigned -c/unsigned)
                    '(4 3 6 5 6 5)
                    '(t t t t nil nil)))))
@@ -1638,7 +1756,8 @@
   (:conditional :e)
   (:policy :fast-safe)
   (:translate eql %eql/integer)
-  (:generator 2 (emit-optimized-cmp x (fixnumize y))))
+  (:args-var x-tn-ref)
+  (:generator 2 (emit-optimized-cmp x (fixnumize y) (tn-ref-type x-tn-ref))))
 
 ;;; FIXME: this seems never to be invoked any more. What did we either break or improve?
 (define-vop (generic-eql-c/fixnum fast-eql-c/fixnum)
@@ -1739,8 +1858,7 @@
                (declare (ignore vop64cf)) ; maybe someone will want it some day
                `(progn
                   (define-modular-fun ,fun64 (x y) ,name :untagged nil 64)
-                  (define-modular-fun ,funfx (x y) ,name :tagged t
-                                      #.(- n-word-bits n-fixnum-tag-bits))
+                  (define-modular-fun ,funfx (x y) ,name :tagged t #.n-fixnum-bits)
                   (define-mod-binop (,vop64u ,vopu) ,fun64)
                   ;; This seems a bit lame. Could we not just have one vop
                   ;; which which takes any combination of signed/unsigned reg
@@ -1766,40 +1884,9 @@
     (move r x)
     (inst neg r)))
 
-(define-modular-fun %negate-modfx (x) %negate :tagged t #.(- n-word-bits
-                                                             n-fixnum-tag-bits))
+(define-modular-fun %negate-modfx (x) %negate :tagged t #.n-fixnum-bits)
 (define-vop (%negate-modfx fast-negate/fixnum)
   (:translate %negate-modfx))
-
-(define-vop (fast-ash-left-mod64-c/unsigned=>unsigned
-             fast-ash-c/unsigned=>unsigned)
-  (:translate ash-left-mod64))
-(define-vop (fast-ash-left-mod64/unsigned=>unsigned
-             fast-ash-left/unsigned=>unsigned))
-(define-vop (fast-ash-left-mod64/unsigned-unbounded=>unsigned
-             fast-ash-left/unsigned-unbounded=>unsigned)
-  (:translate ash-left-mod64))
-(deftransform ash-left-mod64 ((integer count)
-                              ((unsigned-byte 64) (unsigned-byte 6)))
-  (when (sb-c::constant-lvar-p count)
-    (sb-c::give-up-ir1-transform))
-  '(%primitive fast-ash-left-mod64/unsigned=>unsigned integer count))
-
-(define-vop (fast-ash-left-modfx-c/fixnum=>fixnum
-             fast-ash-c/fixnum=>fixnum)
-  (:variant :modular)
-  (:translate ash-left-modfx))
-(define-vop (fast-ash-left-modfx/fixnum-unbounded=>fixnum
-             fast-ash-left/fixnum-unbounded=>fixnum)
-  (:translate ash-left-modfx))
-(define-vop (fast-ash-left-modfx/fixnum=>fixnum
-             fast-ash-left/fixnum=>fixnum))
-(deftransform ash-left-modfx ((integer count)
-                              (fixnum (unsigned-byte 6)))
-  (when (sb-c::constant-lvar-p count)
-    (sb-c::give-up-ir1-transform))
-  '(%primitive fast-ash-left-modfx/fixnum=>fixnum integer count))
-
 (in-package "SB-C")
 
 (defknown sb-vm::%lea-mod64 (integer integer (member 1 2 4 8) (signed-byte 64))
@@ -1817,7 +1904,7 @@
     (cut-to-width index :untagged width nil)
     'sb-vm::%lea-mod64))
 (define-modular-fun-optimizer %lea ((base index scale disp) :tagged t :width width)
-  (when (and (<= width (- sb-vm:n-word-bits sb-vm:n-fixnum-tag-bits))
+  (when (and (<= width sb-vm:n-fixnum-bits)
              (constant-lvar-p scale)
              (constant-lvar-p disp))
     (cut-to-width base :tagged width t)
@@ -1829,7 +1916,7 @@
   (defun sb-vm::%lea-mod64 (base index scale disp)
     (ldb (byte 64 0) (%lea base index scale disp)))
   (defun sb-vm::%lea-modfx (base index scale disp)
-    (mask-signed-field (- sb-vm:n-word-bits sb-vm:n-fixnum-tag-bits)
+    (mask-signed-field sb-vm:n-fixnum-bits
                        (%lea base index scale disp))))
 #-sb-xc-host
 (progn
@@ -1840,7 +1927,7 @@
       ;; constant SCALE and DISP.
       (ldb (byte 64 0) (+ base (* index scale) disp))))
   (defun sb-vm::%lea-modfx (base index scale disp)
-    (let* ((fixnum-width (- sb-vm:n-word-bits sb-vm:n-fixnum-tag-bits))
+    (let* ((fixnum-width sb-vm:n-fixnum-bits)
            (base (mask-signed-field fixnum-width base))
            (index (mask-signed-field fixnum-width index)))
       ;; can't use modular version of %LEA, as we only have VOPs for

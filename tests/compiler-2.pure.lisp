@@ -3315,3 +3315,70 @@
               (+ x 1)))))
    ((-1) :good)
    ((0) 1)))
+
+(with-test (:name :fold-ash-mod-0)
+  (checked-compile-and-assert
+      ()
+      `(lambda ()
+         (loop for i below 3 sum
+               (ldb (byte 6 6)
+                    (ash i (mask-field (byte 5 8) i)))))
+    (() 0)))
+
+(with-test (:name :substitute-single-use-lvar-type-multiple-uses)
+  (checked-compile-and-assert
+   ()
+   `(lambda (c)
+      (let ((z
+              (ceiling
+               (truncate 655
+                         (min -7
+                              (if c
+                                  -1000
+                                  3)))
+               3)))
+        z))
+   ((t) 0)
+   ((nil) -31)))
+
+(with-test (:name :division-by-multiplication-type-derivation)
+  (assert
+   (equal (caddr
+           (sb-kernel:%simple-fun-type
+            (checked-compile
+             `(lambda (c)
+                (declare (optimize speed))
+                (ceiling
+                 (truncate 65527
+                           (min -78
+                                (if c
+                                    -913097464
+                                    5)))
+                 39)))))
+          '(values (or (integer -21 -20) bit) (integer -38 0) &optional)))
+  (assert
+   (equal (caddr
+           (sb-kernel:%simple-fun-type
+            (checked-compile
+             `(lambda (c)
+                (declare (optimize speed))
+                (ceiling
+                 (truncate 65527
+                           (min 78
+                                (if c
+                                    913097464
+                                    5)))
+                 39)))))
+          '(values (or (integer 21 22) (integer 336 337)) (integer -38 0) &optional))))
+
+(with-test (:name :boundp-ir2-optimizer)
+  (checked-compile-and-assert
+   ()
+   `(lambda (v)
+      (flet ((f (s)
+               (when (boundp s)
+                 (symbol-value s))))
+        (f v)
+        (f v)
+        v))
+   ((t) t)))

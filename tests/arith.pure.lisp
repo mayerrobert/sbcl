@@ -877,3 +877,85 @@
                (optimize speed (safety 0)))
       (mod x y))
    :allow-notes nil))
+
+(with-test (:name :ash-fixnum)
+  (checked-compile-and-assert
+   ()
+   `(lambda (b)
+     (declare (type (integer -2 2) b))
+     (ash b (min 13 b)))
+   ((-2) -1)
+   ((-1) -1)
+   ((0) 0)
+   ((1) 2)
+   ((2) 8)))
+
+(with-test (:name :mod-ash-cut)
+  (checked-compile-and-assert
+      ()
+      `(lambda (b)
+         (logand #xFF (ash 1 (the (integer -1000 1000) b))))
+    ((1) 2)
+    ((500) 0))
+  (checked-compile-and-assert
+      ()
+      `(lambda (x b)
+         (logand #xFF (ash (the (unsigned-byte 64) x) (the (integer -1000 1000) b))))
+    (((1- (expt 2 64)) -63) 1)
+    (((1- (expt 2 64)) -64) 0)))
+
+(with-test (:name :bogus-modular-fun-widths)
+  (checked-compile-and-assert
+      ()
+      `(lambda (b)
+         (logorc2 0 (- (isqrt (abs (logand (if b -1 2) 2))))))
+    ((t) 0)
+    ((nil) 0)))
+
+(with-test (:name :lognot-type-derive)
+  (assert
+   (equal (caddr (sb-kernel:%simple-fun-type
+                  (checked-compile
+                   `(lambda (b)
+                      (lognot (if b -1 2))))))
+          '(values (or (integer -3 -3) (integer 0 0)) &optional))))
+
+(with-test (:name :logand-minus-1-type-derive)
+  (assert
+   (equal (caddr (sb-kernel:%simple-fun-type
+                   (checked-compile
+                    `(lambda (b)
+                       (logand #xf (if b -1 2))))))
+          '(values (or (integer 2 2) (integer 15 15)) &optional))))
+
+(with-test (:name :ash-vop-liftimes)
+  (checked-compile-and-assert
+      ()
+      `(lambda (A C)
+         (declare ((integer 18512171785636 25543390924355) a)
+                  ((integer -20485927966480856 54446023204744213) c))
+         (dpb a (byte 20 25) (ash a (min 2 c))))
+    ((23906959691249 -15632482499364879) 15512918556672)
+    ((23906959691249 1) 50697318833122)))
+
+
+(with-test (:name :ash-modarith-transform-loop)
+  (checked-compile-and-assert
+      ()
+      `(lambda (p1 p2 p3)
+         (declare (type (integer * 53) p1)
+                  (type number p2)
+                  (type
+                   (member 21006398744832 16437837094852630852 2251799813685252
+                           -1597729350241882 466525164)
+                   p3))
+         (ldb (byte (the (integer -3642545987372 *) p1) p2) p3))
+    ((53 2 21006398744832) 5251599686208)))
+
+(with-test (:name :logcount-negative-fixnum)
+  (checked-compile-and-assert
+      ()
+      `(lambda (x)
+         (logcount (the fixnum x)))
+    ((54) 4)
+    ((-54) 4)))
